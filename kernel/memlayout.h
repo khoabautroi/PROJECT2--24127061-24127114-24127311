@@ -62,9 +62,14 @@
 //   TRAPFRAME (p->trapframe, used by the trampoline)
 //   TRAMPOLINE (the same page as in the kernel)
 #define TRAPFRAME (TRAMPOLINE - PGSIZE)
-#ifdef LAB_PGTBL
+// map the shared usyscall page just below the trapframe.
+// this page is mapped read-only in user space to speed up 
+// certain system calls (e.g., getpid) by avoiding kernel traps.
 #define USYSCALL (TRAPFRAME - PGSIZE)
 
+// prevent the assembler from seeing C struct definitions,
+// which would cause compilation errors in assembly files (.S).
+#ifndef __ASSEMBLER__
 struct usyscall {
   int pid;  // Process ID
 };
