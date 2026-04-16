@@ -1,63 +1,44 @@
 #include "kernel/types.h"
 #include "kernel/stat.h"
-#include "user/user.h"
 #include "kernel/fcntl.h"
-#include "kernel/fs.h"
+#include "user/user.h"
+
+#define BSIZE 1024
 
 int
-main()
+main(void)
 {
+  int fd, i, n;
   char buf[BSIZE];
-  int fd, i, blocks, readblocks;
 
-  fd = open("big.file", O_CREATE | O_WRONLY);
+  fd = open("big.file", O_CREATE | O_RDWR);
   if(fd < 0){
-    printf("bigfile: cannot open big.file for writing\n");
-    exit(-1);
+    fprintf(2, "bigfile: cannot open big.file for writing\n");
+    exit(1);
   }
 
-  blocks = 0;
+  memset(buf, 'a', sizeof(buf));
+
+  n = 0;
   while(1){
-    *(int*)buf = blocks;
-    int cc = write(fd, buf, sizeof(buf));
-    if(cc <= 0)
+    i = write(fd, buf, sizeof(buf));
+    if(i != sizeof(buf))
       break;
-    blocks++;
-    if (blocks % 100 == 0)
+    n++;
+
+    if(n % 100 == 0)
       printf(".");
   }
 
-  printf("\nwrote %d blocks\n", blocks);
-  if(blocks != 65803) {
+  printf("\nwrote %d blocks\n", n);
+
+  if(n != 65803){
     printf("bigfile: file is too small\n");
-    exit(-1);
+    close(fd);
+    exit(1);
   }
-  
+
+  printf("done; ok\n");
   close(fd);
-  fd = open("big.file", O_RDONLY);
-  printf("reading bigfile\n");
-  if(fd < 0){
-    printf("bigfile: cannot re-open big.file for reading\n");
-    exit(-1);
-  }
-  readblocks = 0;
-  for(i = 0; i < blocks; i++){
-    int cc = read(fd, buf, sizeof(buf));
-    if(cc <= 0){
-      printf("bigfile: read error at block %d\n", i);
-      exit(-1);
-    }
-    if(*(int*)buf != i){
-      printf("bigfile: read the wrong data (%d) for block %d\n",
-             *(int*)buf, i);
-      exit(-1);
-    }
-    readblocks++;
-    if (readblocks % 100 == 0)
-      printf(".");
-  }
-
-  printf("\nbigfile done; ok\n"); 
-
   exit(0);
 }

@@ -22,6 +22,7 @@
 #include "file.h"
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
+
 // there should be one superblock per disk device, but we run with
 // only one device
 struct superblock sb; 
@@ -39,7 +40,8 @@ readsb(int dev, struct superblock *sb)
 
 // Init fs
 void
-fsinit(int dev) {
+fsinit(int dev)
+{
   readsb(dev, &sb);
   if(sb.magic != FSMAGIC)
     panic("invalid file system");
@@ -192,7 +194,7 @@ iinit()
 static struct inode* iget(uint dev, uint inum);
 
 // Allocate an inode on device dev.
-// Mark it as allocated by  giving it type type.
+// Mark it as allocated by giving it type type.
 // Returns an unlocked but allocated and referenced inode,
 // or NULL if there is no free inode.
 struct inode*
@@ -373,8 +375,9 @@ iunlockput(struct inode *ip)
 //
 // The content (data) associated with each inode is stored
 // in blocks on the disk. The first NDIRECT block numbers
-// are listed in ip->addrs[].  The next NINDIRECT blocks are
-// listed in block ip->addrs[NDIRECT].
+// are listed in ip->addrs[]. The next NINDIRECT blocks are
+// listed in block ip->addrs[NDIRECT]. The final NDINDIRECT
+// blocks are reached through ip->addrs[NDIRECT+1].
 
 // Return the disk block address of the nth block in inode ip.
 // If there is no such block, bmap allocates one.
@@ -385,6 +388,7 @@ bmap(struct inode *ip, uint bn)
   uint addr, *a;
   struct buf *bp;
 
+  // Direct blocks.
   if(bn < NDIRECT){
     if((addr = ip->addrs[bn]) == 0){
       addr = balloc(ip->dev);
@@ -396,15 +400,16 @@ bmap(struct inode *ip, uint bn)
   }
   bn -= NDIRECT;
 
+  // Singly-indirect blocks.
   if(bn < NINDIRECT){
-    // Load indirect block, allocating if necessary.
     if((addr = ip->addrs[NDIRECT]) == 0){
       addr = balloc(ip->dev);
       if(addr == 0)
         return 0;
       ip->addrs[NDIRECT] = addr;
     }
-    bp = bread(ip->dev, addr);
+
+    bp = bread(ip->dev, ip->addrs[NDIRECT]);
     a = (uint*)bp->data;
     if((addr = a[bn]) == 0){
       addr = balloc(ip->dev);
@@ -414,6 +419,53 @@ bmap(struct inode *ip, uint bn)
       }
     }
     brelse(bp);
+    return addr;
+  }
+  bn -= NINDIRECT;
+
+  // Doubly-indirect blocks.
+  if(bn < NDINDIRECT){
+    uint first, second;
+    uint indirect_addr;
+    uint *a2;
+    struct buf *bp2;
+
+    if((addr = ip->addrs[NDIRECT + 1]) == 0){
+      addr = balloc(ip->dev);
+      if(addr == 0)
+        return 0;
+      ip->addrs[NDIRECT + 1] = addr;
+    }
+
+    first = bn / NINDIRECT;
+    second = bn % NINDIRECT;
+
+    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+    a = (uint*)bp->data;
+
+    if((indirect_addr = a[first]) == 0){
+      indirect_addr = balloc(ip->dev);
+      if(indirect_addr){
+        a[first] = indirect_addr;
+        log_write(bp);
+      }
+    }
+    brelse(bp);
+
+    if(indirect_addr == 0)
+      return 0;
+
+    bp2 = bread(ip->dev, indirect_addr);
+    a2 = (uint*)bp2->data;
+
+    if((addr = a2[second]) == 0){
+      addr = balloc(ip->dev);
+      if(addr){
+        a2[second] = addr;
+        log_write(bp2);
+      }
+    }
+    brelse(bp2);
     return addr;
   }
 
@@ -426,9 +478,10 @@ void
 itrunc(struct inode *ip)
 {
   int i, j;
-  struct buf *bp;
-  uint *a;
+  struct buf *bp, *bp2;
+  uint *a, *a2;
 
+  // Free direct blocks.
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
       bfree(ip->dev, ip->addrs[i]);
@@ -436,6 +489,7 @@ itrunc(struct inode *ip)
     }
   }
 
+  // Free singly-indirect blocks.
   if(ip->addrs[NDIRECT]){
     bp = bread(ip->dev, ip->addrs[NDIRECT]);
     a = (uint*)bp->data;
@@ -446,6 +500,31 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  // Free doubly-indirect blocks.
+  if(ip->addrs[NDIRECT + 1]){
+    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+    a = (uint*)bp->data;
+
+    for(i = 0; i < NINDIRECT; i++){
+      if(a[i]){
+        bp2 = bread(ip->dev, a[i]);
+        a2 = (uint*)bp2->data;
+
+        for(j = 0; j < NINDIRECT; j++){
+          if(a2[j])
+            bfree(ip->dev, a2[j]);
+        }
+
+        brelse(bp2);
+        bfree(ip->dev, a[i]);
+      }
+    }
+
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT + 1]);
+    ip->addrs[NDIRECT + 1] = 0;
   }
 
   ip->size = 0;
@@ -479,13 +558,13 @@ readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n)
   if(off + n > ip->size)
     n = ip->size - off;
 
-  for(tot=0; tot<n; tot+=m, off+=m, dst+=m){
-    uint addr = bmap(ip, off/BSIZE);
+  for(tot = 0; tot < n; tot += m, off += m, dst += m){
+    uint addr = bmap(ip, off / BSIZE);
     if(addr == 0)
       break;
     bp = bread(ip->dev, addr);
-    m = min(n - tot, BSIZE - off%BSIZE);
-    if(either_copyout(user_dst, dst, bp->data + (off % BSIZE), m) == -1) {
+    m = min(n - tot, BSIZE - off % BSIZE);
+    if(either_copyout(user_dst, dst, bp->data + (off % BSIZE), m) == -1){
       brelse(bp);
       tot = -1;
       break;
@@ -510,16 +589,16 @@ writei(struct inode *ip, int user_src, uint64 src, uint off, uint n)
 
   if(off > ip->size || off + n < off)
     return -1;
-  if(off + n > MAXFILE*BSIZE)
+  if(off + n > MAXFILE * BSIZE)
     return -1;
 
-  for(tot=0; tot<n; tot+=m, off+=m, src+=m){
-    uint addr = bmap(ip, off/BSIZE);
+  for(tot = 0; tot < n; tot += m, off += m, src += m){
+    uint addr = bmap(ip, off / BSIZE);
     if(addr == 0)
       break;
     bp = bread(ip->dev, addr);
-    m = min(n - tot, BSIZE - off%BSIZE);
-    if(either_copyin(bp->data + (off % BSIZE), user_src, src, m) == -1) {
+    m = min(n - tot, BSIZE - off % BSIZE);
+    if(either_copyin(bp->data + (off % BSIZE), user_src, src, m) == -1){
       brelse(bp);
       break;
     }

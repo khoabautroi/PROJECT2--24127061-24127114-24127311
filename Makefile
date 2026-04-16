@@ -1,4 +1,3 @@
-
 # To compile and run with a lab solution, set the lab name in conf/lab.mk
 # (e.g., LAB=util).  Run make grade to test solution with the lab's
 # grade script (e.g., grade-lab-util).
@@ -50,7 +49,6 @@ OBJS += \
 	$K/sprintf.o
 endif
 
-
 ifeq ($(LAB),net)
 OBJS += \
 	$K/e1000.o \
@@ -58,10 +56,9 @@ OBJS += \
 	$K/pci.o
 endif
 
-
 # riscv64-unknown-elf- or riscv64-linux-gnu-
 # perhaps in /opt/riscv/bin
-#TOOLPREFIX = 
+#TOOLPREFIX =
 
 # Try to infer the correct TOOLPREFIX if not set
 ifndef TOOLPREFIX
@@ -135,7 +132,6 @@ $(OBJS): EXTRAFLAG := $(KCSANFLAG)
 $K/%.o: $K/%.c
 	$(CC) $(CFLAGS) $(EXTRAFLAG) -c -o $@ $<
 
-
 $U/initcode: $U/initcode.S
 	$(CC) $(CFLAGS) -march=rv64g -nostdinc -I. -Ikernel -c $U/initcode.S -o $U/initcode.o
 	$(LD) $(LDFLAGS) -N -e start -Ttext 0 -o $U/initcode.out $U/initcode.o
@@ -172,7 +168,7 @@ mkfs/mkfs: mkfs/mkfs.c $K/fs.h $K/param.h
 	gcc $(XCFLAGS) -Werror -Wall -I. -o mkfs/mkfs mkfs/mkfs.c
 
 # Prevent deletion of intermediate files, e.g. cat.o, after first build, so
-# that disk image changes after first build are persistent until clean.  More
+# that disk image changes after first build are persistent until clean. More
 # details:
 # http://www.gnu.org/software/make/manual/html_node/Chained-Rules.html
 .PRECIOUS: %.o
@@ -194,9 +190,7 @@ UPROGS=\
 	$U/_grind\
 	$U/_wc\
 	$U/_zombie\
-
-
-
+	$U/_bigfile\
 
 ifeq ($(LAB),syscall)
 UPROGS += \
@@ -255,12 +249,6 @@ UPROGS += \
 	$U/_bcachetest
 endif
 
-ifeq ($(LAB),fs)
-UPROGS += \
-	$U/_bigfile
-endif
-
-
 ifeq ($(LAB),mmap)
 UPROGS += \
 	$U/_mmaptest
@@ -276,11 +264,10 @@ ifeq ($(LAB),util)
 	UEXTRA += user/xargstest.sh
 endif
 
-
 fs.img: mkfs/mkfs README $(UEXTRA) $(UPROGS)
 	mkfs/mkfs fs.img README $(UEXTRA) $(UPROGS)
 
-newfs.img: 
+newfs.img:
 	-mv -f fs.img fs.img.bk
 
 -include kernel/*.d user/*.d
@@ -299,9 +286,11 @@ GDBPORT = $(shell expr `id -u` % 5000 + 25000)
 QEMUGDB = $(shell if $(QEMU) -help | grep -q '^-gdb'; \
 	then echo "-gdb tcp::$(GDBPORT)"; \
 	else echo "-s -p $(GDBPORT)"; fi)
+
 ifndef CPUS
 CPUS := 3
 endif
+
 ifeq ($(LAB),fs)
 CPUS := 1
 endif
@@ -337,7 +326,6 @@ qemu-gdb: $K/kernel .gdbinit fs.img
 ifeq ($(LAB),net)
 # try to generate a unique port for the echo server
 SERVERPORT = $(shell expr `id -u` % 5000 + 25099)
-
 endif
 
 ##
